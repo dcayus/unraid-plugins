@@ -1,0 +1,174 @@
+<?xml version='1.0' standalone='yes'?>
+<!DOCTYPE PLUGIN [
+  <!ENTITY name      "dvb-driver">
+  <!ENTITY author    "ich777">
+  <!ENTITY version   "2021.03.12">
+  <!ENTITY launch    "Settings/dvb-driver">
+  <!ENTITY gitURL    "https://github.com/&author;/unraid-&name;/raw/master">
+  <!ENTITY pluginURL "&gitURL;/&name;.plg">
+  <!ENTITY md5       "99cdacfaa1591015fa361295f89493a2">
+  <!ENTITY plugin    "/boot/config/plugins/&name;">
+  <!ENTITY emhttp    "/usr/local/emhttp/plugins/&name;">
+]>
+
+<PLUGIN  name="&name;" author="&author;" version="&version;" launch="&launch;" pluginURL="&pluginURL;" min="6.9.0-beta31" support="https://forums.unraid.net/topic/99027-plugin-dvb-driver/">
+
+
+<CHANGES>
+
+###2021.03.12
+- Fixed Permissions
+- Added wait for network including timeout
+
+###2020.11.17
+- Added TBS-OpenSource DVB drivers
+
+###2020.11.16
+- Updated support link
+- Fixed a issue with DigitalDevices builds
+- Fixed a issue with Xbox One USB builds
+
+###2020.11.14
+- Added information and warning how to load the needed Kernel Module(s) on system startup to initialize the DVB Card(s) correctly
+- Added autodetection of DVB card and loading needed Kernel Module(s)
+- Show selected Driver-Package version to Plugin page
+
+###2020.11.09
+- Fixed a bug where md5 check errors out
+
+###2020.10.27
+- added LibreELEC, DigitalDevices and Xbox One USB DVB Adapter packages
+- check for old packages
+- updated download links
+
+###2020.10.24
+- Initial release
+
+</CHANGES>
+
+<FILE Run="/bin/bash">
+<INLINE>
+rm -f $(ls /boot/config/plugins/&name;/&name;*.txz 2>/dev/null|grep -v '&version;')
+</INLINE>
+</FILE>
+
+<FILE Name="/boot/config/plugins/&name;/&name;-&version;.txz" Run="upgradepkg --install-new">
+<URL>&gitURL;/packages/&name;-&version;.txz</URL>
+<MD5>&md5;</MD5>
+</FILE>
+
+<FILE Name="&emhttp;/README.md">
+<INLINE>
+**DVB Driver**
+
+DVB Drivers for Unraid (Currently supported LibreELEC, TBS-OpenSource, DigitalDevices and Xbox One USB Adapter Drivers)
+</INLINE>
+</FILE>
+
+<FILE Run="/bin/bash">
+<INLINE>
+
+#Create settings file if not found
+if [ ! -f "&plugin;/settings.cfg" ]; then
+  echo 'first_installation=true
+dvb_package=digitaldevices' > "&plugin;/settings.cfg"
+fi
+
+#Wait for Network and timeout after 30 seconds
+HOST="www.google.com"
+for i in {1..10}; do
+  ping -c1 $HOST &amp;> /dev/null &amp;&amp; break;
+done
+
+KERNEL_V="$(uname -r)"
+PACKAGE="$(grep "dvb_package" "&plugin;/settings.cfg" | cut -d '=' -f2)"
+DL_URL="https://github.com/ich777/unraid-plugins-repo/releases/download/$KERNEL_V"
+
+if [ ! -d "&plugin;/packages/${KERNEL_V%%-*}" ]; then
+  mkdir -p "&plugin;/packages/${KERNEL_V%%-*}"
+fi
+
+download_package() {
+#Download DVB-Driver-Package
+if wget -q -nc --show-progress --progress=bar:force:noscroll -O "&plugin;/packages/${KERNEL_V%%-*}/${PACKAGE}-1.txz" "${DL_URL}/${PACKAGE}-1.txz" ; then
+  if [ "$(md5sum "&plugin;/packages/${KERNEL_V%%-*}/${PACKAGE}-1.txz" | cut -d ' ' -f1)" != "$(wget -qO- "${DL_URL}/${PACKAGE}-1.txz.md5" | cut -d ' ' -f1)" ]; then
+    echo
+    echo "---CHECKSUM ERROR!---"
+    exit 1
+  fi
+  echo
+  echo "-----------Sucessfully downloaded ${PACKAGE}-DVB-Driver-Package-------------"
+else
+  echo
+  echo "---------------Can't download ${PACKAGE}-DVB-Driver-Package-----------------"
+  rm -rf &plugin;
+  exit 1
+fi
+}
+
+check_package() {
+if [ ! -f "&plugin;/packages/${KERNEL_V%%-*}/${PACKAGE}-1.txz" ]; then
+  echo
+  echo "-----------------Downloading ${PACKAGE}-DVB-Driver-Package-------------------"
+  echo "---------This could take some time, please don't close this window!---------"
+  #Check for old packages that are not suitable for this Kernel
+  rm -rf $(find &plugin;/packages/ -maxdepth 1 -type d 2>/dev/null | tail -n +2 | grep -v "${KERNEL_V%%-*}")
+  download_package
+else
+  echo
+  echo "-----------------${PACKAGE}-DVB-Driver-Package found locally-----------------"
+  #Check for old packages that are not suitable for this Kernel
+  rm -rf $(find &plugin;/packages/ -maxdepth 1 -type d 2>/dev/null | tail -n +2 | grep -v "${KERNEL_V%%-*}")
+fi
+}
+
+install_package() {
+#Install driver package
+/sbin/installpkg "&plugin;/packages/${KERNEL_V%%-*}/${PACKAGE}-1.txz"
+depmod -a 2>/dev/null
+udevadm trigger 2>/dev/null
+}
+
+#Check if DVB-Driver-Package is allready downloaded
+check_package
+install_package >/dev/null
+
+#Display message to restart
+if [ "$(grep "first_installation=" "&plugin;/settings.cfg" | cut -d '=' -f2)" == "true" ]; then
+  /usr/local/emhttp/plugins/dynamix/scripts/notify -e "DVB Driver" -d "Please reboot your server in order to activate the DVB-Driver-Package ATTENTION: Please update your 'go' file if the plugin doesn't load the Kernel Module correctly for you DVB card, for more information see the DVB Plugin page." -i "alert"
+  sed -i '/first_installation=true/c\first_installation=false' "&plugin;/settings.cfg"
+  echo
+  echo "---------------Installation of DVB-Driver-Package successfull---------------"
+  echo
+  echo "-----------------------------------------------------------------------------"
+  echo "---Please reboot your server in order to activate the DVB-Driver-Package!----"
+  echo "-----------------------------------------------------------------------------"
+  echo
+else
+  echo
+  echo "---------------Installation of DVB-Driver-Package successfull---------------"
+  echo
+fi
+
+</INLINE>
+</FILE>
+
+<FILE Run="/bin/bash" Method="remove">
+<INLINE>
+
+echo "----------------------------------------"
+echo "---Uninstalling DVB-Driver-Package---"
+echo "----------------------------------------"
+# Remove plugin related files
+removepkg &name;-&version;
+rm -rf /usr/local/emhttp/plugins/&name;
+rm -rf &plugin;
+echo
+echo "----------------------------------------------------------------------------"
+echo "--------DVB-Driver-Package uninstalled, please reboot your server!----------"
+echo "----------------------------------------------------------------------------"
+echo
+
+</INLINE>
+</FILE>
+</PLUGIN>
